@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Video Downloader</title>
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --surface: #18181c;
+      --border: #2a2a30;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #a78bfa;
+      --accent-hover: #c4b5fd;
+      --error: #f87171;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    main {
+      width: 100%;
+      max-width: 28rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      font-size: 0.875rem;
+      color: var(--muted);
+      margin-bottom: 1.5rem;
+    }
+    .input-wrap {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    input[type="url"] {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      font-size: 0.9375rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="url"]::placeholder {
+      color: var(--muted);
+    }
+    input[type="url"]:focus {
+      border-color: var(--accent);
+    }
+    button {
+      padding: 0.75rem 1.25rem;
+      font-size: 0.9375rem;
+      font-weight: 500;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    button:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .message {
+      font-size: 0.875rem;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+      display: none;
+    }
+    .message.visible {
+      display: block;
+    }
+    .message.error {
+      background: rgba(248, 113, 113, 0.12);
+      color: var(--error);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+    }
+    .message.loading {
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .disclaimer {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 2rem;
+      max-width: 28rem;
+      line-height: 1.5;
+    }
+    .supported {
+      font-size: 0.8125rem;
+      color: var(--muted);
+      margin-top: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Social Video Downloader</h1>
+    <p class="sub">Paste a link to a video from Twitter, Instagram, TikTok, or YouTube.</p>
+    <div class="input-wrap">
+      <input
+        type="url"
+        id="url"
+        placeholder="https://youtube.com/... or twitter.com/..."
+        autocomplete="off"
+      />
+      <button type="button" id="btn">Download</button>
+    </div>
+    <p class="supported">Supported: YouTube, Twitter/X, Instagram, TikTok</p>
+    <div id="message" class="message" role="alert"></div>
+    <p class="disclaimer">
+      For personal use only. Downloading may violate platform terms of service or copyright. Use at your own risk.
+    </p>
+  </main>
+  <script>
+    const urlInput = document.getElementById("url");
+    const btn = document.getElementById("btn");
+    const messageEl = document.getElementById("message");
+
+    const API_BASE = "";
+
+    function showMessage(text, type) {
+      messageEl.textContent = text;
+      messageEl.className = "message visible " + (type || "");
+    }
+
+    function hideMessage() {
+      messageEl.className = "message";
+    }
+
+    async function handleDownload() {
+      const url = urlInput.value.trim();
+      if (!url) {
+        showMessage("Please paste a video link.", "error");
+        return;
+      }
+
+      btn.disabled = true;
+      showMessage("Getting video…", "loading");
+
+      try {
+        const res = await fetch(API_BASE + "/api/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+
+        const contentType = res.headers.get("Content-Type") || "";
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          const detail = data.detail || res.statusText;
+          showMessage(detail, "error");
+          if (res.status === 429) urlInput.focus();
+          return;
+        }
+
+        if (contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data.downloadUrl) {
+            window.location.href = data.downloadUrl;
+            showMessage("Download started.", "loading");
+          } else {
+            showMessage("No download URL returned.", "error");
+          }
+          return;
+        }
+
+        const blob = await res.blob();
+        const disposition = res.headers.get("Content-Disposition");
+        let filename = "video.mp4";
+        if (disposition) {
+          const match = disposition.match(/filename="?([^";\n]+)"?/);
+          if (match) filename = match[1].trim();
+        }
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        showMessage("Download started.", "loading");
+        hideMessage();
+      } catch (err) {
+        showMessage(err.message || "Network error.", "error");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    btn.addEventListener("click", handleDownload);
+    urlInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleDownload();
+    });
+  </script>
+</body>
+</html>
