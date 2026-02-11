@@ -87,12 +87,14 @@ def _ydl_opts_base(*, is_youtube: bool = False, use_pot: bool = False) -> dict:
     # for YouTube (our browser-like UA from a Linux server triggers bot detection).
     if not is_youtube:
         opts["http_headers"] = _HTTP_HEADERS
-    # Optional PO-token provider (YouTube only, second attempt)
+    # Optional PO-token provider (YouTube only)
     if use_pot:
         pot_url = os.environ.get("YT_DLP_POT_PROVIDER_URL", "").strip()
         if pot_url:
+            # yt-dlp Python API requires extractor_args values to be *lists*
+            # (the CLI parser does this automatically; we must do it manually)
             opts["extractor_args"] = {
-                "youtubepot-bgutilhttp": {"base_url": pot_url},
+                "youtubepot-bgutilhttp": {"base_url": [pot_url]},
             }
     if os.path.isfile(_COOKIES_FILE):
         opts["cookiefile"] = _COOKIES_FILE
@@ -177,11 +179,16 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
     has_pot = bool(os.environ.get("YT_DLP_POT_PROVIDER_URL", "").strip())
 
     # Build a list of option sets to try.
-    # Attempt 1 is always vanilla (mirrors `yt-dlp <url>` on the CLI).
-    # For YouTube, if a POT provider is configured we add a second attempt that uses it.
-    attempts: list[dict] = [_ydl_opts_base(is_youtube=is_yt)]
+    # For YouTube with a POT provider: try POT first (solves "confirm you're not a bot"),
+    # then fall back to vanilla in case the provider is misconfigured.
+    # For everything else (or YouTube without POT): single vanilla attempt.
     if is_yt and has_pot:
-        attempts.append(_ydl_opts_base(is_youtube=True, use_pot=True))
+        attempts: list[dict] = [
+            _ydl_opts_base(is_youtube=True, use_pot=True),
+            _ydl_opts_base(is_youtube=True),
+        ]
+    else:
+        attempts = [_ydl_opts_base(is_youtube=is_yt)]
 
     # --- Phase 1: extract metadata -------------------------------------------
     info = None
