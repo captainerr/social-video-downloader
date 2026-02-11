@@ -287,3 +287,7 @@ systemctl status svd
 - **Can’t connect to site**: Check `ufw status`; ensure 80/443 are allowed. Confirm Caddy is running: `systemctl status caddy`.
 - **HTTPS certificate errors**: Ensure the domain’s A record points to this server’s IP and that ports 80 and 443 are open. Wait a few minutes for DNS to propagate.
 - **Downloads fail**: Check app logs with `journalctl -u svd -f`. Ensure the server can reach the internet (e.g. `curl -I https://youtube.com`).
+- **git pull: "Your local changes would be overwritten by merge"** (e.g. `backend/.venv` or `backend/__pycache__`): Clear the conflicting paths so the merge can proceed, then run the update script.
+  - **Option A (recommended):** `git checkout -- backend/.venv backend/__pycache__` then `git pull` then `./scripts/update.sh`.
+  - **Option B (discard all local changes):** `git reset --hard HEAD` then `git pull` then `./scripts/update.sh`.
+  The update script will recreate the venv and restart the app. To prevent this in future, ensure the repo no longer tracks `.venv`/`__pycache__` (see README "Deploy updates" for the one-time `git rm -r --cached` on your local machine and push).
