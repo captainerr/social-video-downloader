@@ -186,6 +186,7 @@
           if (data.downloadUrl) {
             window.location.href = data.downloadUrl;
             showMessage("Download started.", "loading");
+            setTimeout(hideMessage, 2500);
           } else {
             showMessage("No download URL returned.", "error");
           }
@@ -215,7 +216,7 @@
 
     btn.addEventListener("click", handleDownload);
     urlInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") handleDownload();
+      if (e.key === "Enter" && !btn.disabled) handleDownload();
     });
   </script>
 </body>
