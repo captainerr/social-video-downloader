@@ -205,7 +205,7 @@
         a.click();
         URL.revokeObjectURL(a.href);
         showMessage("Download started.", "loading");
-        hideMessage();
+        setTimeout(hideMessage, 2500);
       } catch (err) {
         showMessage(err.message || "Network error.", "error");
       } finally {
