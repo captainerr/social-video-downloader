@@ -3,6 +3,7 @@ Social video downloader API: accepts a URL, uses yt-dlp to extract the video,
 returns redirect to direct URL or streams the file.
 """
 import asyncio
+import logging
 import os
 import re
 import tempfile
@@ -22,6 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
+
+logger = logging.getLogger("svd")
+logging.basicConfig(level=logging.INFO)
 
 ALLOWED_ORIGINS = [
     "https://twitter.com",
@@ -65,23 +69,31 @@ _HTTP_HEADERS = {
     "Accept-Language": "en-us,en;q=0.9",
 }
 
-def _ydl_opts_base(extractor_args: dict | None = None, is_youtube: bool = False) -> dict:
+def _ydl_opts_base(*, is_youtube: bool = False, use_pot: bool = False) -> dict:
+    """Build yt-dlp options.
+
+    For YouTube we intentionally pass *no* custom headers and *no* player_client
+    overrides so the behaviour matches ``yt-dlp <url>`` on the CLI (which works).
+    The POT provider is only injected on an explicit retry so the first attempt is
+    as vanilla as possible.
+    """
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
         "socket_timeout": YT_DLP_TIMEOUT,
     }
-    # Only pass custom headers for non-YouTube; yt-dlp's defaults work better for YouTube
-    # (CLI succeeds with defaults; our browser-like UA can trigger bot detection)
+    # Only pass custom headers for non-YouTube; yt-dlp's defaults work better
+    # for YouTube (our browser-like UA from a Linux server triggers bot detection).
     if not is_youtube:
         opts["http_headers"] = _HTTP_HEADERS
-    merged: dict = dict(extractor_args) if extractor_args else {}
-    pot_url = os.environ.get("YT_DLP_POT_PROVIDER_URL", "").strip()
-    if pot_url:
-        merged["youtubepot-bgutilhttp"] = {"base_url": pot_url}
-    if merged:
-        opts["extractor_args"] = merged  # must be dict for Python API
+    # Optional PO-token provider (YouTube only, second attempt)
+    if use_pot:
+        pot_url = os.environ.get("YT_DLP_POT_PROVIDER_URL", "").strip()
+        if pot_url:
+            opts["extractor_args"] = {
+                "youtubepot-bgutilhttp": {"base_url": pot_url},
+            }
     if os.path.isfile(_COOKIES_FILE):
         opts["cookiefile"] = _COOKIES_FILE
     return opts
@@ -93,22 +105,13 @@ def _is_youtube(url: str) -> bool:
     return netloc in ("youtube.com", "www.youtube.com", "youtu.be", "m.youtube.com", "music.youtube.com")
 
 
-def _is_bot_or_login_error(msg: str) -> bool:
+def _looks_like_bot_block(msg: str) -> bool:
+    """Return True if the error looks like a bot / login / rate-limit block."""
     msg_lower = (msg or "").lower()
     return any(
-        x in msg_lower
-        for x in ("bot", "login", "sign in", "cookies", "rate-limit", "rate limit", "not available")
+        kw in msg_lower
+        for kw in ("bot", "login", "sign in", "cookies", "rate-limit", "rate limit", "not available")
     )
-
-
-def _friendly_message(raw: str, url: str) -> str:
-    """Return a short, friendly error when platforms block us (no cookies, no cost)."""
-    if _is_bot_or_login_error(raw) and (_is_youtube(url) or "instagram" in raw.lower()):
-        return (
-            "This platform is blocking automated requests right now. "
-            "Twitter and TikTok usually work — try one of those, or try again later."
-        )
-    return raw or "Failed to get video."
 
 
 def _get_client_ip(request: Request) -> str:
@@ -170,22 +173,24 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
             detail="URL must be from Twitter/X, Instagram, TikTok, or YouTube.",
         )
 
-    # Try extraction; for YouTube, retry with alternate clients if we hit bot/login blocks
-    # No-PO clients (tv_simply, tv) first; then android/mweb (need PO token if provider not running)
-    youtube_clients: list[dict | None] = [
-        None,
-        {"youtube": {"player_client": "tv_simply"}},
-        {"youtube": {"player_client": "tv"}},
-        {"youtube": {"player_client": "android"}},
-        {"youtube": {"player_client": "mweb"}},
-    ]
-    last_error: str | None = None
+    is_yt = _is_youtube(url)
+    has_pot = bool(os.environ.get("YT_DLP_POT_PROVIDER_URL", "").strip())
+
+    # Build a list of option sets to try.
+    # Attempt 1 is always vanilla (mirrors `yt-dlp <url>` on the CLI).
+    # For YouTube, if a POT provider is configured we add a second attempt that uses it.
+    attempts: list[dict] = [_ydl_opts_base(is_youtube=is_yt)]
+    if is_yt and has_pot:
+        attempts.append(_ydl_opts_base(is_youtube=True, use_pot=True))
+
+    # --- Phase 1: extract metadata -------------------------------------------
     info = None
     winning_opts = None
+    last_error: str = ""
 
-    for extractor_arg in youtube_clients if _is_youtube(url) else [None]:
-        opts = _ydl_opts_base(extractor_arg, is_youtube=_is_youtube(url))
+    for i, opts in enumerate(attempts):
         try:
+            logger.info("Attempt %d/%d for %s (opts keys: %s)", i + 1, len(attempts), url, list(opts.keys()))
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
             if info:
@@ -193,25 +198,33 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
                 break
         except yt_dlp.utils.DownloadError as e:
             last_error = str(e).split("\n")[0] if str(e) else "Failed to extract video."
-            if _is_youtube(url) and _is_bot_or_login_error(last_error) and extractor_arg != youtube_clients[-1]:
-                await asyncio.sleep(2)  # avoid rapid-fire retries that trigger rate limits
-                continue  # try next client
-            raise HTTPException(status_code=422, detail=_friendly_message(last_error, url))
+            logger.warning("Extraction attempt %d failed for %s: %s", i + 1, url, last_error)
+            # If this was a bot/rate-limit block and we have more attempts, retry
+            if _looks_like_bot_block(last_error) and i < len(attempts) - 1:
+                await asyncio.sleep(2)
+                continue
+            raise HTTPException(status_code=422, detail=last_error)
         except Exception as e:
+            logger.exception("Unexpected error extracting %s", url)
             raise HTTPException(status_code=500, detail=f"Extraction failed: {e!s}")
 
     if not info or not isinstance(info, dict):
-        raise HTTPException(status_code=422, detail=_friendly_message(last_error or "No video found.", url))
+        raise HTTPException(status_code=422, detail=last_error or "No video found.")
 
+    # --- Phase 2: download the file -------------------------------------------
     title = info.get("title") or "video"
     safe_title = re.sub(r'[^\w\s\-.]', '', title)[:80].strip() or "video"
     filename = f"{safe_title}.mp4"
 
     out_tmpl = str(Path(tempfile.gettempdir()) / "svd_%(id)s.%(ext)s")
-    ydl_opts = {**(winning_opts or _ydl_opts_base(None, is_youtube=_is_youtube(url))), "outtmpl": out_tmpl, "format": "best[ext=mp4]/best"}
+    dl_opts = {
+        **(winning_opts or _ydl_opts_base(is_youtube=is_yt)),
+        "outtmpl": out_tmpl,
+        "format": "best[ext=mp4]/best",
+    }
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(dl_opts) as ydl:
             result = ydl.extract_info(url, download=True)
             if not result or not isinstance(result, dict):
                 raise HTTPException(status_code=422, detail="Download failed.")
@@ -228,10 +241,12 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
         )
     except yt_dlp.utils.DownloadError as e:
         msg = str(e).split("\n")[0] if str(e) else "Download failed."
-        raise HTTPException(status_code=422, detail=_friendly_message(msg, url))
+        logger.warning("Download failed for %s: %s", url, msg)
+        raise HTTPException(status_code=422, detail=msg)
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Unexpected error downloading %s", url)
         raise HTTPException(status_code=500, detail=f"Download failed: {e!s}")
 
 
