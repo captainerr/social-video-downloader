@@ -47,6 +47,8 @@ Use a **long-running server** (VPS or PaaS), not serverless (Lambda, Cloud Funct
 
 **Step-by-step**: See **[Deploy on Vultr](docs/DEPLOY-VULTR.md)** for a full walkthrough (instance, systemd, Caddy, HTTPS).
 
+**Optional: YouTube PO Token provider** – If YouTube blocks with "Sign in to confirm you're not a bot", run the [BgUtils POT provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) (Docker) on the server; see the deploy doc for steps. The app tries no-token clients first (`tv_simply`, `tv`), so YouTube often works without the provider.
+
 **Deploy updates (smoother pulls)**
 
 - **One-time on your Mac** (so Git stops tracking `__pycache__` and `.venv`; avoids merge conflicts on the server):

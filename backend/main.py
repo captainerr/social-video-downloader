@@ -72,8 +72,12 @@ def _ydl_opts_base(extractor_args: dict | None = None) -> dict:
         "socket_timeout": YT_DLP_TIMEOUT,
         "http_headers": _HTTP_HEADERS,
     }
-    if extractor_args:
-        opts["extractor_args"] = extractor_args  # must be dict for Python API
+    merged: dict = dict(extractor_args) if extractor_args else {}
+    pot_url = os.environ.get("YT_DLP_POT_PROVIDER_URL", "").strip()
+    if pot_url:
+        merged["youtubepot-bgutilhttp"] = {"base_url": pot_url}
+    if merged:
+        opts["extractor_args"] = merged  # must be dict for Python API
     if os.path.isfile(_COOKIES_FILE):
         opts["cookiefile"] = _COOKIES_FILE
     return opts
@@ -162,9 +166,11 @@ async def download(request: Request, body: DownloadRequest):
         )
 
     # Try extraction; for YouTube, retry with alternate clients if we hit bot/login blocks
-    # Python API expects extractor_args as dict, not string (string causes .get() on str)
+    # No-PO clients (tv_simply, tv) first; then android/mweb (need PO token if provider not running)
     youtube_clients: list[dict | None] = [
         None,
+        {"youtube": {"player_client": "tv_simply"}},
+        {"youtube": {"player_client": "tv"}},
         {"youtube": {"player_client": "android"}},
         {"youtube": {"player_client": "mweb"}},
     ]
