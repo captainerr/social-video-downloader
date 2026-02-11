@@ -64,7 +64,7 @@ _HTTP_HEADERS = {
     "Accept-Language": "en-us,en;q=0.9",
 }
 
-def _ydl_opts_base(extractor_args: str | None = None) -> dict:
+def _ydl_opts_base(extractor_args: dict | None = None) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -73,7 +73,7 @@ def _ydl_opts_base(extractor_args: str | None = None) -> dict:
         "http_headers": _HTTP_HEADERS,
     }
     if extractor_args:
-        opts["extractor_args"] = extractor_args
+        opts["extractor_args"] = extractor_args  # must be dict for Python API
     if os.path.isfile(_COOKIES_FILE):
         opts["cookiefile"] = _COOKIES_FILE
     return opts
@@ -162,7 +162,12 @@ async def download(request: Request, body: DownloadRequest):
         )
 
     # Try extraction; for YouTube, retry with alternate clients if we hit bot/login blocks
-    youtube_clients = [None, "youtube:player_client=android", "youtube:player_client=mweb"]
+    # Python API expects extractor_args as dict, not string (string causes .get() on str)
+    youtube_clients: list[dict | None] = [
+        None,
+        {"youtube": {"player_client": "android"}},
+        {"youtube": {"player_client": "mweb"}},
+    ]
     last_error: str | None = None
     info = None
     winning_opts = None
