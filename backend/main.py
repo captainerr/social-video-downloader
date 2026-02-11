@@ -60,6 +60,7 @@ _rate_limit: dict[str, list[float]] = {}
 # Optional: path to Netscape cookies file for Instagram/YouTube when they require login or block bots.
 # Set YT_DLP_COOKIES_FILE or place a file at backend/cookies.txt (export from browser).
 _COOKIES_FILE = os.environ.get("YT_DLP_COOKIES_FILE") or str(Path(__file__).resolve().parent / "cookies.txt")
+logger.info("Cookies file path: %s (exists: %s)", _COOKIES_FILE, os.path.isfile(_COOKIES_FILE))
 
 
 # Browser-like headers to reduce "bot" blocks (no cookies, no cost)
@@ -197,7 +198,10 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
 
     for i, opts in enumerate(attempts):
         try:
-            logger.info("Attempt %d/%d for %s (opts keys: %s)", i + 1, len(attempts), url, list(opts.keys()))
+            logger.info("Attempt %d/%d for %s | cookies=%s pot=%s",
+                        i + 1, len(attempts), url,
+                        opts.get("cookiefile", "none"),
+                        "extractor_args" in opts)
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
             if info:
