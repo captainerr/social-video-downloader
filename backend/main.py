@@ -231,7 +231,9 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
     # --- Phase 2: download the file -------------------------------------------
     title = info.get("title") or "video"
     safe_title = re.sub(r'[^\w\s\-.]', '', title)[:80].strip() or "video"
-    filename = f"{safe_title}.mp4"
+    # HTTP headers must be latin-1; avoid Unicode in Content-Disposition to prevent codec errors
+    filename_ascii = safe_title.encode("ascii", "ignore").decode().strip() or "video"
+    filename = f"{filename_ascii}.mp4"
 
     # Unique prefix per request so concurrent downloads of the same video don't share a temp file
     # (otherwise one request's bg-delete could remove the file another is still streaming)
