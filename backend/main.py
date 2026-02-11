@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import tempfile
 import time
 from pathlib import Path
@@ -37,6 +38,11 @@ ALLOWED_ORIGINS = [
     "https://tiktok.com",
     "https://www.tiktok.com",
     "https://vm.tiktok.com",
+    "https://facebook.com",
+    "https://www.facebook.com",
+    "https://fb.com",
+    "https://www.fb.com",
+    "https://fb.watch",
     "https://youtube.com",
     "https://www.youtube.com",
     "https://youtu.be",
@@ -49,7 +55,7 @@ for origin in ALLOWED_ORIGINS:
 # Allow mobile variants
 ALLOWED_NETLOCS.update({
     "mobile.twitter.com", "m.twitter.com", "m.instagram.com",
-    "m.youtube.com", "music.youtube.com",
+    "m.facebook.com", "m.youtube.com", "music.youtube.com",
 })
 
 YT_DLP_TIMEOUT = 60
@@ -173,7 +179,7 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
     if not is_allowed_url(url):
         raise HTTPException(
             status_code=400,
-            detail="URL must be from Twitter/X, Instagram, TikTok, or YouTube.",
+            detail="URL must be from Twitter/X, Instagram, TikTok, or Facebook.",
         )
 
     is_yt = _is_youtube(url)
@@ -227,7 +233,9 @@ async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks)
     safe_title = re.sub(r'[^\w\s\-.]', '', title)[:80].strip() or "video"
     filename = f"{safe_title}.mp4"
 
-    out_tmpl = str(Path(tempfile.gettempdir()) / "svd_%(id)s.%(ext)s")
+    # Unique prefix per request so concurrent downloads of the same video don't share a temp file
+    # (otherwise one request's bg-delete could remove the file another is still streaming)
+    out_tmpl = str(Path(tempfile.gettempdir()) / f"svd_{secrets.token_hex(8)}_%(id)s.%(ext)s")
     dl_opts = {
         **(winning_opts or _ydl_opts_base(is_youtube=is_yt)),
         "outtmpl": out_tmpl,
