@@ -1,9 +1,11 @@
 # Cookies (contains session data; do not commit)
 backend/cookies.txt
 
-# Python
+# Python (do not commit; avoids merge conflicts on deploy)
 .venv/
+backend/.venv/
 __pycache__/
+backend/__pycache__/
 *.py[cod]
 *.egg-info/
 .eggs/
