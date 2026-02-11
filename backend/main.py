@@ -17,7 +17,7 @@ import yt_dlp
 # where the default trust store is missing or incomplete.
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import BackgroundTasks, FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -120,13 +120,14 @@ def _check_rate_limit(ip: str) -> None:
     if ip not in _rate_limit:
         _rate_limit[ip] = []
     times = _rate_limit[ip]
-    times.append(now)
+    # Prune expired entries first, then check before appending
     times[:] = [t for t in times if now - t < RATE_LIMIT_WINDOW]
-    if len(times) > RATE_LIMIT_REQUESTS:
+    if len(times) >= RATE_LIMIT_REQUESTS:
         raise HTTPException(
             status_code=429,
             detail="Too many requests. Please try again later.",
         )
+    times.append(now)
 
 
 app = FastAPI(title="Social Video Downloader")
@@ -160,7 +161,7 @@ def is_allowed_url(url: str) -> bool:
 
 
 @app.post("/api/download")
-async def download(request: Request, body: DownloadRequest):
+async def download(request: Request, body: DownloadRequest, bg: BackgroundTasks):
     _check_rate_limit(_get_client_ip(request))
     url = str(body.url)
     if not is_allowed_url(url):
@@ -217,6 +218,8 @@ async def download(request: Request, body: DownloadRequest):
             path = ydl.prepare_filename(result)
         if not Path(path).exists():
             raise HTTPException(status_code=500, detail="File not found after download.")
+        # Schedule temp file deletion after the response is sent
+        bg.add_task(os.unlink, path)
         return FileResponse(
             path,
             media_type="video/mp4",
