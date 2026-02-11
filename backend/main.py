@@ -183,7 +183,7 @@ async def download(request: Request, body: DownloadRequest):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Extraction failed: {e!s}")
 
-    if not info:
+    if not info or not isinstance(info, dict):
         raise HTTPException(status_code=422, detail=_friendly_message(last_error or "No video found.", url))
 
     title = info.get("title") or "video"
@@ -196,7 +196,7 @@ async def download(request: Request, body: DownloadRequest):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(url, download=True)
-        if not result:
+        if not result or not isinstance(result, dict):
             raise HTTPException(status_code=422, detail="Download failed.")
         path = ydl.prepare_filename(result)
         if not Path(path).exists():
