@@ -52,6 +52,22 @@ RATE_LIMIT_REQUESTS = 10
 RATE_LIMIT_WINDOW = 60  # seconds
 _rate_limit: dict[str, list[float]] = {}
 
+# Optional: path to Netscape cookies file for Instagram/YouTube when they require login or block bots.
+# Set YT_DLP_COOKIES_FILE or place a file at backend/cookies.txt (export from browser).
+_COOKIES_FILE = os.environ.get("YT_DLP_COOKIES_FILE") or str(Path(__file__).resolve().parent / "cookies.txt")
+
+
+def _ydl_opts_base() -> dict:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,
+        "socket_timeout": YT_DLP_TIMEOUT,
+    }
+    if os.path.isfile(_COOKIES_FILE):
+        opts["cookiefile"] = _COOKIES_FILE
+    return opts
+
 
 def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
@@ -111,12 +127,7 @@ async def download(request: Request, body: DownloadRequest):
             detail="URL must be from Twitter/X, Instagram, TikTok, or YouTube.",
         )
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": False,
-        "socket_timeout": YT_DLP_TIMEOUT,
-    }
+    ydl_opts = _ydl_opts_base()
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -139,8 +150,7 @@ async def download(request: Request, body: DownloadRequest):
     # return 403 when the browser opens the direct URL (wrong Referer); streaming
     # through our server lets yt-dlp send the correct headers when fetching.
     out_tmpl = str(Path(tempfile.gettempdir()) / "svd_%(id)s.%(ext)s")
-    ydl_opts["outtmpl"] = out_tmpl
-    ydl_opts["format"] = "best[ext=mp4]/best"
+    ydl_opts = {**_ydl_opts_base(), "outtmpl": out_tmpl, "format": "best[ext=mp4]/best"}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
