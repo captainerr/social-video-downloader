@@ -279,9 +279,21 @@ If YouTube often returns "Sign in to confirm you're not a bot", you can run a **
    ```bash
    docker run -d -p 4416:4416 --name pot-provider --restart unless-stopped brainicism/bgutil-ytdlp-pot-provider
    ```
-3. **Restart the app** so it picks up the plugin (already in `requirements.txt`): `systemctl restart svd`.
+3. **Add the provider URL to the systemd service** so the app tells yt-dlp to use it. Edit the service file:
+   ```bash
+   nano /etc/systemd/system/svd.service
+   ```
+   Add this line inside the `[Service]` block (after `WorkingDirectory` or `User`):
+   ```ini
+   Environment="YT_DLP_POT_PROVIDER_URL=http://127.0.0.1:4416"
+   ```
+   Then:
+   ```bash
+   systemctl daemon-reload
+   systemctl restart svd
+   ```
 
-The app uses the provider at `http://127.0.0.1:4416` by default. If you run the provider on a different port or host, set the env var before starting the app (e.g. in the systemd service file): `Environment="YT_DLP_POT_PROVIDER_URL=http://127.0.0.1:8080"`, then `systemctl daemon-reload` and `systemctl restart svd`.
+Without this env var, the app may not use the provider even when it is running. If you run the provider on a different port, use that URL instead (e.g. `http://127.0.0.1:8080`).
 
 Without the provider, the app still tries YouTube clients that do not require a token (`tv_simply`, `tv`) first, which often works.
 

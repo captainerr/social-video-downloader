@@ -2,6 +2,7 @@
 Social video downloader API: accepts a URL, uses yt-dlp to extract the video,
 returns redirect to direct URL or streams the file.
 """
+import asyncio
 import os
 import re
 import tempfile
@@ -64,14 +65,17 @@ _HTTP_HEADERS = {
     "Accept-Language": "en-us,en;q=0.9",
 }
 
-def _ydl_opts_base(extractor_args: dict | None = None) -> dict:
-    opts = {
+def _ydl_opts_base(extractor_args: dict | None = None, is_youtube: bool = False) -> dict:
+    opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
         "socket_timeout": YT_DLP_TIMEOUT,
-        "http_headers": _HTTP_HEADERS,
     }
+    # Only pass custom headers for non-YouTube; yt-dlp's defaults work better for YouTube
+    # (CLI succeeds with defaults; our browser-like UA can trigger bot detection)
+    if not is_youtube:
+        opts["http_headers"] = _HTTP_HEADERS
     merged: dict = dict(extractor_args) if extractor_args else {}
     pot_url = os.environ.get("YT_DLP_POT_PROVIDER_URL", "").strip()
     if pot_url:
@@ -179,7 +183,7 @@ async def download(request: Request, body: DownloadRequest):
     winning_opts = None
 
     for extractor_arg in youtube_clients if _is_youtube(url) else [None]:
-        opts = _ydl_opts_base(extractor_arg)
+        opts = _ydl_opts_base(extractor_arg, is_youtube=_is_youtube(url))
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -189,6 +193,7 @@ async def download(request: Request, body: DownloadRequest):
         except yt_dlp.utils.DownloadError as e:
             last_error = str(e).split("\n")[0] if str(e) else "Failed to extract video."
             if _is_youtube(url) and _is_bot_or_login_error(last_error) and extractor_arg != youtube_clients[-1]:
+                await asyncio.sleep(2)  # avoid rapid-fire retries that trigger rate limits
                 continue  # try next client
             raise HTTPException(status_code=422, detail=_friendly_message(last_error, url))
         except Exception as e:
@@ -202,7 +207,7 @@ async def download(request: Request, body: DownloadRequest):
     filename = f"{safe_title}.mp4"
 
     out_tmpl = str(Path(tempfile.gettempdir()) / "svd_%(id)s.%(ext)s")
-    ydl_opts = {**(winning_opts or _ydl_opts_base()), "outtmpl": out_tmpl, "format": "best[ext=mp4]/best"}
+    ydl_opts = {**(winning_opts or _ydl_opts_base(None, is_youtube=_is_youtube(url))), "outtmpl": out_tmpl, "format": "best[ext=mp4]/best"}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
