@@ -47,6 +47,23 @@ Use a **long-running server** (VPS or PaaS), not serverless (Lambda, Cloud Funct
 
 **Step-by-step**: See **[Deploy on Vultr](docs/DEPLOY-VULTR.md)** for a full walkthrough (instance, systemd, Caddy, HTTPS).
 
+**Deploy updates (smoother pulls)**
+
+- **One-time on your Mac** (so Git stops tracking `__pycache__` and `.venv`; avoids merge conflicts on the server):
+  ```bash
+  cd /path/to/social-video-downloader
+  git rm -r --cached backend/__pycache__ 2>/dev/null || true
+  git rm -r --cached backend/.venv 2>/dev/null || true
+  git add .gitignore
+  git commit -m "Stop tracking __pycache__ and .venv"
+  git push
+  ```
+- **On the server**, after each change just run:
+  ```bash
+  cd /root/social-video-downloader && chmod +x scripts/update.sh && ./scripts/update.sh
+  ```
+  (First time: `chmod +x scripts/update.sh`; after that only `./scripts/update.sh`.) The script pulls, installs deps, and restarts `svd`.
+
 **Options**
 
 | Type | Examples | Notes |

@@ -277,7 +277,7 @@ systemctl status svd
 | View app logs | `journalctl -u svd -f` |
 | Restart app | `systemctl restart svd` |
 | Restart Caddy | `systemctl reload caddy` |
-| Update app (if using Git) | `cd /opt/social-video-downloader && git pull && systemctl restart svd` |
+| **Update app** (pull + deps + restart) | `cd /root/social-video-downloader && ./scripts/update.sh` (or use `/opt/...` if you cloned there) |
 
 ---
 
